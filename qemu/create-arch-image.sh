@@ -1,50 +1,86 @@
-# Install base dependencies
-sudo pacman -S qemu-base arch-install-scripts
+#!/usr/bin/env bash
+set -euo pipefail
 
-qemu-img create -f raw arch.img 10G
+IMG="$HOME/linux/qemu/arch.img"
+MNT="/mnt/archvm"
+SIZE="10G"
 
-mkfs.ext4 -F arch.img
+sudo pacman -S --needed qemu-base arch-install-scripts
 
-sudo losetup --find --show -P arch.img
+mkdir -p "$(dirname "$IMG")"
 
-sudo mkdir -p /mnt/archvm
+if [[ -e "$IMG" ]]; then
+  echo "Image already exists: $IMG"
+  echo "Delete it first if you want to recreate it:"
+  echo "  rm '$IMG'"
+  exit 1
+fi
 
-sudo mount /dev/loop0 /mnt/archvm
+qemu-img create -f raw "$IMG" "$SIZE"
+mkfs.ext4 -F "$IMG"
 
-sudo pacstrap -K /mnt/archvm base linux-firmware openssh sudo vim tmux git strace less iproute2 dhcpcd
+LOOPDEV="$(sudo losetup --find --show -P "$IMG")"
+echo "Using loop device: $LOOPDEV"
 
-sudo arch-chroot /mnt/archvm
+cleanup() {
+  set +e
+  sudo umount -R "$MNT" 2>/dev/null
+  sudo losetup -d "$LOOPDEV" 2>/dev/null
+}
+trap cleanup EXIT
 
-#Inside the arch-chroot:
+sudo mkdir -p "$MNT"
+sudo mount "$LOOPDEV" "$MNT"
+
+sudo pacstrap -K "$MNT" \
+  base \
+  linux-firmware \
+  openssh \
+  sudo \
+  vim \
+  tmux \
+  git \
+  strace \
+  less \
+  iproute2 \
+  dhcpcd \
+  iptables
+
+sudo genfstab -U "$MNT" | sudo tee "$MNT/etc/fstab" >/dev/null
+
+sudo arch-chroot "$MNT" /bin/bash <<'EOF'
+set -euo pipefail
+
 echo archvm > /etc/hostname
-echo "127.0.0.1 localhost" > /etc/hosts
-echo "::1 localhost" >> /etc/hosts
-echo "127.0.1.1 archvm.localdomain archvm" >> /etc/hosts
+
+cat > /etc/hosts <<'HOSTS'
+127.0.0.1 localhost
+::1 localhost
+127.0.1.1 archvm.localdomain archvm
+HOSTS
+
 systemctl enable sshd
 systemctl enable dhcpcd
 systemctl enable serial-getty@ttyS0.service
+
+# For a throwaway local VM, this allows root console login with no password.
+# You may prefer setting a real password instead.
 passwd -d root
+
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
+EOF
 
-#exit the arch-chroot
-exit
-#go back to home directory
-cd
-#Create ssh private and public key on host
-ssh-keygen -t ed25519 -C "archvm" -f ~/.ssh/archvm_ed25519_linux_dev
+KEY="$HOME/.ssh/archvm_ed25519_linux_dev"
 
-#Copy public key over to client vm
-cat .ssh/archvm_ed25519_linux_dev.pub | sudo tee /mnt/archvm/root/.ssh/authorized_keys
-#Ensure correct permissions for VM
-sudo chmod 700 /mnt/archvm/root/.ssh
-sudo chmod 600 /mnt/archvm/root/.ssh/authorized_keys
+if [[ ! -f "$KEY" ]]; then
+  ssh-keygen -t ed25519 -C "archvm" -f "$KEY"
+else
+  echo "SSH key already exists: $KEY"
+fi
 
-#Kill gpg not allowing unmount
-# sudo kill 98945
-# sudo pkill -f gpg-agent
-#Unmount image
-sudo umount /mnt/archvm
+cat "$KEY.pub" | sudo tee "$MNT/root/.ssh/authorized_keys" >/dev/null
+sudo chmod 700 "$MNT/root/.ssh"
+sudo chmod 600 "$MNT/root/.ssh/authorized_keys"
 
-losetup -j ~/linux/qemu/arch.img
-sudo losetup -d /dev/loop0
+echo "Done. Image created at: $IMG"
