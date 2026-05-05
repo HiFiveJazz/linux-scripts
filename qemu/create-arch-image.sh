@@ -3,7 +3,7 @@ set -euo pipefail
 
 IMG="$HOME/linux/qemu/arch.img"
 MNT="/mnt/archvm"
-SIZE="10G"
+SIZE="30G"
 
 sudo pacman -S --needed qemu-base arch-install-scripts
 

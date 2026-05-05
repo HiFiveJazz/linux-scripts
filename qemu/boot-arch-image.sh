@@ -4,7 +4,7 @@ qemu-system-x86_64 \
   -enable-kvm \
   -m 4G \
   -smp 6 \
-  -drive file=$HOME/GitHub/linux-scripts/qemu/arch.img,format=raw,if=virtio \
+  -drive file=$HOME/linux/qemu/arch.img,format=raw,if=virtio \
   -kernel /boot/vmlinuz-linux-dev \
   -initrd /boot/initramfs-linux-dev.img \
   -append "root=/dev/vda rw console=ttyS0 loglevel=7 earlyprintk=serial" \
